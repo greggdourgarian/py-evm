@@ -43,7 +43,6 @@ BASE_FIXTURE_PATH = os.path.join(ROOT_PROJECT_DIR, 'fixtures', 'BlockchainTests'
 def blockchain_fixture_skip_fn(fixture_path, fixture_name, fixture):
     # TODO: enable all tests
     return (
-        'bcValidBlockTest' not in fixture_path or  # TODO: remove
         'Homestead' in fixture_path or  # TODO: enable
         'Homestead' in fixture_name or  # TODO: enable
         'EIP150' in fixture_path or  # TODO: enable
@@ -70,6 +69,7 @@ FIXTURES = find_fixtures(
     BASE_FIXTURE_PATH,
     normalize_blockchain_fixtures,
     skip_fn=blockchain_fixture_skip_fn,
+    ignore_fn=blockchain_fixture_skip_fn,  # TODO: remove
     mark_fn=blockchain_fixture_mark_fn,
 )
 
