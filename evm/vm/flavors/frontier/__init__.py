@@ -254,7 +254,6 @@ def _apply_frontier_create_message(vm, message):
     if vm.state_db.account_exists(message.storage_address):
         vm.state_db.set_nonce(message.storage_address, 0)
         vm.state_db.set_code(message.storage_address, b'')
-        vm.state_db.delete_storage(message.storage_address)
 
     if message.sender != message.origin:
         vm.state_db.increment_nonce(message.sender)
