@@ -257,13 +257,17 @@ class EVM(object):
                 )
             )
 
-        vm = self.get_vm(block.header)
+        # TODO: weird that this vm instance is instantiated with whatever
+        # header is currently in place and then that header is immediately
+        # discarded.
+        vm = self.get_vm()
         imported_block = vm.import_block(block)
 
-        # TODO: figure out validation
-        assert imported_block == block
+        persist_block_to_db(self.db, imported_block)
+        self.header = self.get_vm_class_for_block_number(
+            block_number=imported_block.number + 1,
+        ).create_header_from_parent(imported_block.header)
 
-        self.header = imported_block.header
         return imported_block
 
     def mine_block(self, **mine_params):

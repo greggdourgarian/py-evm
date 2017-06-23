@@ -7,6 +7,7 @@ import pytest
 from eth_utils import (
     is_0x_prefixed,
     to_canonical_address,
+    to_normalized_address,
     decode_hex,
     remove_0x_prefix,
     pad_left,
@@ -17,8 +18,14 @@ from evm.constants import (
     CREATE_CONTRACT_ADDRESS,
 )
 
-from evm.utils.numeric import (
+from .numeric import (
     big_endian_to_int,
+)
+from .state import (
+    diff_state_db,
+)
+from .rlp import (
+    diff_rlp_object,
 )
 
 
@@ -79,6 +86,30 @@ def find_fixtures(fixtures_base_dir, normalize_fn, skip_fn=None, mark_fn=None, i
                     continue
 
             yield fixture_name, normalized_fixture
+
+
+#
+# RLP Diffing
+#
+
+
+def assert_rlp_equal(left, right):
+    if left == right:
+        return
+    mismatched_fields = diff_rlp_object(left, right)
+    error_message = (
+        "RLP objects not equal for {0} fields:\n - {1}".format(
+            len(mismatched_fields),
+            "\n - ".join(tuple(
+                "{0}:\n    (actual)  : {1}\n    (expected): {2}".format(
+                    field_name, actual, expected
+                )
+                for field_name, actual, expected
+                in mismatched_fields
+            )),
+        )
+    )
+    raise AssertionError(error_message)
 
 
 #
@@ -340,29 +371,33 @@ def setup_state_db(desired_state, state_db):
 
 
 def verify_state_db(expected_state, state_db):
-    for account, account_data in sorted(expected_state.items()):
-        for slot, expected_storage_value in sorted(account_data['storage'].items()):
-            actual_storage_value = state_db.get_storage(account, slot)
-
-            assert actual_storage_value == expected_storage_value
-
-        expected_nonce = account_data['nonce']
-        expected_code = account_data['code']
-        expected_balance = account_data['balance']
-
-        actual_nonce = state_db.get_nonce(account)
-        actual_code = state_db.get_code(account)
-        actual_balance = state_db.get_balance(account)
-        balance_delta = expected_balance - actual_balance
-
-        assert actual_nonce == expected_nonce
-        assert actual_code == expected_code
-
-        balance_error_message = (
-            "Expected: {0} - Actual: {1} | Delta: {2}".format(
-                expected_balance,
-                actual_balance,
-                balance_delta,
+    diff = diff_state_db(expected_state, state_db)
+    if diff:
+        error_messages = []
+        for account, field, actual_value, expected_value in diff:
+            if field == 'balance':
+                error_messages.append(
+                    "{0}({1}) | Actual: {2} | Expected: {3} | Delta: {4}".format(
+                        to_normalized_address(account),
+                        'balance',
+                        actual_value,
+                        expected_value,
+                        expected_value - actual_value,
+                    )
+                )
+            else:
+                error_messages.append(
+                    "{0}({1}) | Actual: {2} | Expected: {3}".format(
+                        to_normalized_address(account),
+                        field,
+                        actual_value,
+                        expected_value,
+                    )
+                )
+        raise AssertionError(
+            "State DB did not match expected state on {0} values:\n"
+            "{1}".format(
+                len(error_messages),
+                "\n - ".join(error_messages),
             )
         )
-        assert balance_delta == 0, balance_error_message

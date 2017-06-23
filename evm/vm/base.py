@@ -2,10 +2,17 @@ from __future__ import absolute_import
 
 import logging
 
+from eth_utils import (
+    pad_right,
+)
+
 from evm.constants import (
     BLOCK_REWARD,
     NEPHEW_REWARD,
     UNCLE_DEPTH_PENALTY_FACTOR,
+)
+from evm.exceptions import (
+    ValidationError,
 )
 from evm.logic.invalid import (
     InvalidOpcode,
@@ -13,6 +20,10 @@ from evm.logic.invalid import (
 
 
 from evm.state import State
+
+from evm.utils.rlp import (
+    diff_rlp_object,
+)
 
 
 class VM(object):
@@ -130,7 +141,6 @@ class VM(object):
 
         vm.configure_header(
             coinbase=block.header.coinbase,
-            difficulty=block.header.difficulty,
             gas_limit=block.header.gas_limit,
             timestamp=block.header.timestamp,
             extra_data=block.header.extra_data,
@@ -144,7 +154,27 @@ class VM(object):
         for uncle in block.uncles:
             vm.block.add_uncle(uncle)
 
-        return vm.mine_block()
+        mined_block = vm.mine_block()
+        if mined_block != block:
+            diff = diff_rlp_object(mined_block, block)
+            longest_field_name = max(len(field_name) for field_name, _, _ in diff)
+            error_message = (
+                "Mismatch between block and imported block on {0} fields:\n - {1}".format(
+                    len(diff),
+                    "\n - ".join(tuple(
+                        "{0}:\n    (actual)  : {1}\n    (expected): {2}".format(
+                            pad_right(field_name, longest_field_name, ' '),
+                            actual,
+                            expected,
+                        )
+                        for field_name, actual, expected
+                        in diff
+                    )),
+                )
+            )
+            raise ValidationError(error_message)
+
+        return mined_block
 
     def mine_block(self, *args, **kwargs):
         """
@@ -158,12 +188,22 @@ class VM(object):
             )
 
             self.state_db.delta_balance(block.header.coinbase, block_reward)
+            self.logger.debug(
+                "BLOCK REWARD: %s -> %s",
+                block_reward,
+                block.header.coinbase,
+            )
 
             for uncle in block.uncles:
                 uncle_reward = block_reward * (
                     UNCLE_DEPTH_PENALTY_FACTOR + uncle.block_number - block.number
                 ) // UNCLE_DEPTH_PENALTY_FACTOR
                 self.state_db.delta_balance(uncle.coinbase, uncle_reward)
+                self.logger.debug(
+                    "UNCLE REWARD REWARD: %s -> %s",
+                    uncle_reward,
+                    uncle.coinbase,
+                )
 
             block.header.state_root = self.state_db.root_hash
 

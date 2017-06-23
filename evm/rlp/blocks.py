@@ -58,6 +58,12 @@ class BaseBlock(rlp.Serializable):
         """
         raise NotImplementedError("Must be implemented by subclasses")
 
+    def add_uncle(self, uncle):
+        """
+        Adds the given uncle to the current block.
+        """
+        raise NotImplementedError("Must be implemented by subclasses")
+
     def mine(self, *args, **kwargs):
         """
         Mines the block.

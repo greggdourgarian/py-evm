@@ -31,6 +31,7 @@ from evm.utils.fixture_tests import (
     normalize_blockchain_fixtures,
     setup_state_db,
     verify_state_db,
+    assert_rlp_equal,
 )
 
 
@@ -80,43 +81,6 @@ FIXTURES = find_fixtures(
 )
 
 
-def diff_rlp_object(left, right):
-    if type(left) is not type(right):
-        raise AssertionError(
-            "Type mismatch.  Got {0} and {1}".format(repr(type(left)), repr(type(right)))
-        )
-
-    rlp_type = type(left)
-
-    rlp_field_names = tuple(sorted(set(tuple(zip(*rlp_type.fields))[0])))
-    mismatched_fields = tuple(
-        (field_name, getattr(left, field_name), getattr(right, field_name))
-        for field_name
-        in rlp_field_names
-        if getattr(left, field_name) != getattr(right, field_name)
-    )
-    return mismatched_fields
-
-
-def assert_rlp_equal(left, right):
-    if left == right:
-        return
-    mismatched_fields = diff_rlp_object(left, right)
-    error_message = (
-        "RLP objects not equal for {0} fields:\n - {1}".format(
-            len(mismatched_fields),
-            "\n - ".join(tuple(
-                "{0}:\n    (actual)  : {1}\n    (expected): {2}".format(
-                    field_name, actual, expected
-                )
-                for field_name, actual, expected
-                in mismatched_fields
-            )),
-        )
-    )
-    raise AssertionError(error_message)
-
-
 @pytest.mark.parametrize(
     'fixture_name,fixture', FIXTURES,
 )
@@ -162,86 +126,30 @@ def test_blockchain_fixtures(fixture_name, fixture):
     # 4 - profit!!
 
     for block_data in fixture['blocks']:
-        should_be_good_block = any((
-            'blockHeader' in block_data,
-            'transactions' in block_data,
-            'uncleHeaders' in block_data,
-            'rlp_error' in block_data,
-        ))
+        should_be_good_block = 'blockHeader' in block_data
 
         if 'rlp_error' in block_data:
             assert not should_be_good_block
             continue
 
         try:
-            expected_block = rlp.decode(
+            block = rlp.decode(
                 block_data['rlp'],
                 sedes=evm.get_vm().get_block_class(),
             )
-        except :
-            assert not should_be_good_block, "Block should not be good"
+        except rlp.DecodingError as err:
+            assert not should_be_good_block, "Block should be good: {0}".format(err)
             continue
 
-        if should_be_good_block:
-            # set the gas limit as this value is only required to be within a
-            # specific range and can be picked by the party who crafts the block.
-            evm.configure_header(
-                extra_data=expected_block.header.extra_data,
-                gas_limit=expected_block.header.gas_limit,
-                coinbase=expected_block.header.coinbase,
-                timestamp=expected_block.header.timestamp,
-            )
+        try:
+            mined_block = evm.import_block(block)
+        except ValidationError as err:
+            assert not should_be_good_block, "Block should be good: {0}".format(err)
+            continue
 
-            for transaction in block_data['transactions']:
-                txn_kwargs = {
-                    'data': transaction['data'],
-                    'gas': transaction['gasLimit'],
-                    'gas_price': transaction['gasPrice'],
-                    'nonce': transaction['nonce'],
-                    'to': transaction['to'],
-                    'value': transaction['value'],
-                    'r': transaction['r'],
-                    's': transaction['s'],
-                    'v': transaction['v'],
-                }
-                transaction = evm.create_transaction(**txn_kwargs)
-                computation = evm.apply_transaction(transaction)
-
-            assert not block_data.get('uncleHeaders', False), 'Time to deal with uncles'
-            block = evm.mine_block(
-                mix_hash=expected_block.header.mix_hash,
-                nonce=expected_block.header.nonce,
-            )
-            expected_header = BlockHeader(
-                parent_hash=block_data['blockHeader']['parentHash'],
-                uncles_hash=block_data['blockHeader']['uncleHash'],
-                coinbase=block_data['blockHeader']['coinbase'],
-                state_root=block_data['blockHeader']['stateRoot'],
-                transaction_root=block_data['blockHeader']['transactionsTrie'],
-                receipt_root=block_data['blockHeader']['receiptTrie'],
-                bloom=block_data['blockHeader']['bloom'],
-                difficulty=block_data['blockHeader']['difficulty'],
-                block_number=block_data['blockHeader']['number'],
-                gas_limit=block_data['blockHeader']['gasLimit'],
-                gas_used=block_data['blockHeader']['gasUsed'],
-                timestamp=block_data['blockHeader']['timestamp'],
-                extra_data=block_data['blockHeader']['extraData'],
-                mix_hash=block_data['blockHeader']['mixHash'],
-                nonce=block_data['blockHeader']['nonce'],
-            )
-
-            assert_rlp_equal(block.header, expected_header)
-            assert_rlp_equal(block, expected_block)
-
-            assert rlp.encode(block) == block_data['rlp']
+            assert_rlp_equal(mined_block, block)
         else:
-            try:
-                expected_block.validate()
-            except ValidationError:
-                assert not should_be_good_block, "Block should not be good"
-                continue
-
-        assert should_be_good_block, "Block should cause a validation error"
+            assert should_be_good_block, "Block should have caused a validation error"
 
     assert evm.get_block_by_number(evm.get_block().number - 1).hash == fixture['lastblockhash']
 

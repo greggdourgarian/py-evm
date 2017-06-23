@@ -242,6 +242,11 @@ class FrontierBlock(BaseBlock):
 
         return self
 
+    def add_uncle(self, uncle):
+        self.uncles.append(uncle)
+        self.header.uncles_hash = keccak(rlp.encode(self.uncles))
+        return self
+
     def mine(self, **kwargs):
         """
         - `uncles_hash`
