@@ -195,7 +195,7 @@ class VM(object):
             )
 
             for uncle in block.uncles:
-                uncle_reward = block_reward * (
+                uncle_reward = BLOCK_REWARD * (
                     UNCLE_DEPTH_PENALTY_FACTOR + uncle.block_number - block.number
                 ) // UNCLE_DEPTH_PENALTY_FACTOR
                 self.state_db.delta_balance(uncle.coinbase, uncle_reward)
@@ -205,7 +205,9 @@ class VM(object):
                     uncle.coinbase,
                 )
 
+            self.logger.debug('BEFORE ROOT: %s', block.header.state_root)
             block.header.state_root = self.state_db.root_hash
+            self.logger.debug('STATE_ROOT: %s', block.header.state_root)
 
         return block
 
