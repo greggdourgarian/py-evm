@@ -44,6 +44,7 @@ BASE_FIXTURE_PATH = os.path.join(ROOT_PROJECT_DIR, 'fixtures', 'BlockchainTests'
 def blockchain_fixture_skip_fn(fixture_path, fixture_name, fixture):
     # TODO: enable all tests
     return (
+        fixture_path.startswith('TestNetwork') or  # TODO: enable
         'Homestead' in fixture_path or  # TODO: enable
         'Homestead' in fixture_name or  # TODO: enable
         'EIP150' in fixture_path or  # TODO: enable
@@ -62,6 +63,7 @@ SLOW_FIXTURE_NAMES = {
     'GeneralStateTests/stCallCreateCallCodeTest/Call1024OOG.json:Call1024OOG_d0g0v0_Frontier',
     'GeneralStateTests/stCallCreateCallCodeTest/Callcode1024OOG.json:Callcode1024OOG_d0g0v0_Frontier',
     'GeneralStateTests/stCallCreateCallCodeTest/CallRecursiveBombPreCall.json:CallRecursiveBombPreCall_d0g0v0_Frontier',
+    'bcForkStressTest.json:ForkStressTest',
 }
 
 

@@ -69,13 +69,6 @@ class StackDepthLimit(VMError):
     pass
 
 
-class InvalidTransaction(BaseEVMError):
-    """
-    Error for signaling a transaction is invalid.
-    """
-    pass
-
-
 class EVMNotFound(BaseEVMError):
     """
     Error for when there is no defined EVM for a given block number.

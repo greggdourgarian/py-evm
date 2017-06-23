@@ -9,8 +9,6 @@ from evm.exceptions import (
     OutOfGas,
     InsufficientFunds,
     StackDepthLimit,
-    ValidationError,
-    InvalidTransaction,
 )
 from evm.precompile import (
     PRECOMPILES,
@@ -52,10 +50,7 @@ def _execute_frontier_transaction(vm, transaction):
     #
 
     # Validate the transaction
-    try:
-        transaction.validate()
-    except ValidationError as err:
-        raise InvalidTransaction(str(err))
+    transaction.validate()
 
     vm.validate_transaction(transaction)
 

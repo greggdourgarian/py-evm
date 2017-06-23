@@ -61,13 +61,13 @@ def find_fixtures(fixtures_base_dir, normalize_fn, skip_fn=None, mark_fn=None, i
             fixture_name = "{0}:{1}".format(fixture_relpath, key)
 
             if ignore_fn:
-                if ignore_fn(fixture_path, key, fixtures[key]):
+                if ignore_fn(fixture_relpath, key, fixtures[key]):
                     continue
 
             normalized_fixture = normalize_fn(fixtures[key])
 
             if skip_fn:
-                if skip_fn(fixture_path, key, fixtures[key]):
+                if skip_fn(fixture_relpath, key, fixtures[key]):
                     yield pytest.param(
                         fixture_name,
                         normalized_fixture,
