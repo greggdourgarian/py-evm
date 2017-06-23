@@ -12,20 +12,6 @@ class ValidationError(BaseEVMError):
     pass
 
 
-class InvalidBlock(ValidationError):
-    """
-    Raised when a block does not pass validation checks.
-    """
-    pass
-
-
-class InvalidSignature(ValidationError):
-    """
-    Error to signal something does not pass a validation check.
-    """
-    pass
-
-
 class VMError(BaseEVMError):
     """
     Class of errors which can be raised during EVM execution.

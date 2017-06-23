@@ -19,7 +19,6 @@ from eth_utils import (
 from evm.exceptions import (
     InvalidTransaction,
     ValidationError,
-    InvalidSignature,
 )
 from evm.vm.flavors import (
     MainnetEVM,

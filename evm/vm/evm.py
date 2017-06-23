@@ -9,6 +9,8 @@ from evm.exceptions import (
 )
 from evm.validation import (
     validate_vm_block_ranges,
+    validate_uint256,
+    validate_word,
 )
 
 from evm.rlp.headers import (
@@ -17,7 +19,6 @@ from evm.rlp.headers import (
 
 from evm.utils.db import (
     make_block_number_to_hash_lookup_key,
-    make_block_hash_to_number_lookup_key,
 )
 from evm.utils.blocks import (
     persist_block_to_db,
@@ -111,11 +112,13 @@ class EVM(object):
         """
         return self.get_vm().create_unsigned_transaction(*args, **kwargs)
 
-    def create_header_from_parent(self, *args, **kwargs):
+    def create_header_from_parent(self, parent_header, **header_params):
         """
         Passthrough helper to the current VM class.
         """
-        return self.get_vm().create_header_from_parent(*args, **kwargs)
+        return self.get_vm_class_for_block_number(
+            block_number=parent_header.block_number + 1,
+        ).create_header_from_parent(parent_header, **header_params)
 
     #
     # EVM Operations
@@ -130,21 +133,22 @@ class EVM(object):
         vm_class = base_vm_class.configure(db=cls.db)
         return vm_class
 
-    def get_vm(self, block_number=None):
+    def get_vm(self, header=None):
         """
         Return the vm instance for the given block number.
         """
-        if block_number is None:
-            block_number = self.header.block_number
+        if header is None:
+            header = self.header
 
-        vm_class = self.get_vm_class_for_block_number(block_number)
-        vm = vm_class(evm=self)
+        vm_class = self.get_vm_class_for_block_number(header.block_number)
+        vm = vm_class(evm=self, header=header)
         return vm
 
     #
     # Block Retrieval
     #
     def get_block_header_by_hash(self, block_hash):
+        validate_word(block_hash)
         block_header = rlp.decode(self.db.get(block_hash), sedes=BlockHeader)
         return block_header
 
@@ -152,9 +156,10 @@ class EVM(object):
         """
         Returns the requested block as specified by block number.
         """
-        # TODO: validate block number
+        validate_uint256(block_number)
         block_hash = self._lookup_block_hash(block_number)
-        vm = self.get_vm(block_number)
+        block_header = self.get_block_header_by_hash(block_hash)
+        vm = self.get_vm(block_header)
         block = vm.get_block_by_hash(block_hash)
         return block
 
@@ -162,6 +167,7 @@ class EVM(object):
         """
         Return the block hash for the given block number.
         """
+        validate_uint256(block_number)
         number_to_hash_key = make_block_number_to_hash_lookup_key(block_number)
         # TODO: can raise KeyError
         block_hash = rlp.decode(
@@ -176,23 +182,11 @@ class EVM(object):
 
         TODO: how do we determine the correct EVM class?
         """
-        # TODO: validate block hash
-        block_number = self._lookup_block_number(block_hash)
-        vm = self.get_vm(block_number)
+        validate_word(block_hash)
+        block_header = self.get_block_header_by_hash(block_hash)
+        vm = self.get_vm(block_header)
         block = vm.get_block_by_hash(block_hash)
         return block
-
-    def _lookup_block_number(self, block_hash):
-        """
-        Return the block number for the given block hash.
-        """
-        hash_to_number_key = make_block_hash_to_number_lookup_key(block_hash)
-        # TODO: can raise KeyError
-        block_number = rlp.decode(
-            self.db.get(hash_to_number_key),
-            sedes=rlp.sedes.big_endian_int,
-        )
-        return block_number
 
     #
     # EVM Initialization
@@ -245,24 +239,43 @@ class EVM(object):
         """
         vm = self.get_vm()
         computation = vm.apply_transaction(transaction)
-        block = vm.block.add_transaction(
-            transaction=transaction,
-            computation=computation,
-        )
+
         # TODO: icky mutation...
-        self.header = block.header
+        self.header = vm.block.header
         return computation
+
+    def import_block(self, block):
+        """
+        Import a complete block.
+        """
+        if block.number > self.header.block_number:
+            raise ValidationError(
+                "Attempt to import block #{0}.  Cannot import block with number "
+                "greater than current block #{1}.".format(
+                    block.number,
+                    self.header.block_number,
+                )
+            )
+
+        vm = self.get_vm(block.header)
+        imported_block = vm.import_block(block)
+
+        # TODO: figure out validation
+        assert imported_block == block
+
+        self.header = imported_block.header
+        return imported_block
 
     def mine_block(self, **mine_params):
         """
         Mine the current block, applying
         """
-        vm = self.get_vm()
-
-        block = vm.mine_block(**mine_params)
+        block = self.get_vm().mine_block(**mine_params)
         persist_block_to_db(self.db, block)
 
-        self.header = vm.create_header_from_parent(block.header)
+        self.header = self.get_vm_class_for_block_number(
+            block_number=block.number + 1,
+        ).create_header_from_parent(block.header)
 
         return block
 

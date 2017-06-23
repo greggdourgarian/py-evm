@@ -23,12 +23,10 @@ class VM(object):
     """
     db = None
 
-    block = None
-
     opcodes = None
     block_class = None
 
-    def __init__(self, evm, db=None):
+    def __init__(self, evm, header, db=None):
         if db is not None:
             self.db = db
 
@@ -38,8 +36,7 @@ class VM(object):
         self.evm = evm
 
         block_class = self.get_block_class()
-        self.block = block_class.from_header(header=self.evm.header)
-        self.state_db = State(db=self.db, root_hash=self.evm.header.state_root)
+        self.block = block_class.from_header(header=header)
 
     @classmethod
     def configure(cls,
@@ -57,6 +54,20 @@ class VM(object):
                 )
         return type(name, (cls,), overrides)
 
+    _block = None
+    state_db = None
+
+    @property
+    def block(self):
+        if self._block is None:
+            raise AttributeError("No block property set")
+        return self._block
+
+    @block.setter
+    def block(self, value):
+        self._block = value
+        self.state_db = State(db=self.db, root_hash=value.header.state_root)
+
     #
     # Logging
     #
@@ -69,7 +80,19 @@ class VM(object):
     #
     def apply_transaction(self, transaction):
         """
-        Execution of a transaction within the VM.
+        Apply the transaction to the vm in the current block.
+        """
+        computation = self.execute_transaction(transaction)
+        # NOTE: mutation
+        self.block = self.block.add_transaction(
+            transaction=transaction,
+            computation=computation,
+        )
+        return computation
+
+    def execute_transaction(self, transaction):
+        """
+        Execute the transaction in the vm.
         """
         raise NotImplementedError("Must be implemented by subclasses")
 
@@ -99,6 +122,29 @@ class VM(object):
 
     def get_nephew_reward(self, block_number):
         return NEPHEW_REWARD
+
+    def import_block(self, block):
+        parent_header = self.evm.get_block_header_by_hash(block.header.parent_hash)
+        init_header = self.create_header_from_parent(parent_header)
+        vm = type(self)(evm=self.evm, header=init_header)
+
+        vm.configure_header(
+            coinbase=block.header.coinbase,
+            difficulty=block.header.difficulty,
+            gas_limit=block.header.gas_limit,
+            timestamp=block.header.timestamp,
+            extra_data=block.header.extra_data,
+            mix_hash=block.header.mix_hash,
+            nonce=block.header.nonce,
+        )
+
+        for transaction in block.transactions:
+            vm.apply_transaction(transaction)
+
+        for uncle in block.uncles:
+            vm.block.add_uncle(uncle)
+
+        return vm.mine_block()
 
     def mine_block(self, *args, **kwargs):
         """
@@ -186,7 +232,8 @@ class VM(object):
     #
     # Headers
     #
-    def create_header_from_parent(self, parent_header, **header_params):
+    @classmethod
+    def create_header_from_parent(cls, parent_header, **header_params):
         """
         Creates and initializes a new block header from the provided
         `parent_header`.

@@ -15,7 +15,7 @@ from evm.constants import (
     EMPTY_UNCLE_HASH,
 )
 from evm.exceptions import (
-    InvalidBlock,
+    ValidationError,
 )
 from evm.rlp.logs import (
     Log,
@@ -30,6 +30,9 @@ from evm.rlp.headers import (
     BlockHeader,
 )
 
+from evm.utils.keccak import (
+    keccak,
+)
 from evm.utils.transactions import (
     get_transactions_from_db,
 )
@@ -81,9 +84,43 @@ class FrontierBlock(BaseBlock):
 
             # timestamp
             if self.header.timestamp < parent_header.timestamp:
-                raise InvalidBlock("Block timestamp is before the parent block's timestamp")
+                raise ValidationError(
+                    "`timestamp` is before the parent block's timestamp.\n"
+                    "- block  : {0}\n"
+                    "- parent : {1}. ".format(
+                        self.header.timestamp,
+                        parent_header.timestamp,
+                    )
+                )
             elif self.header.timestamp == parent_header.timestamp:
-                raise InvalidBlock("Block timestamp is equal to the parent block's timestamp")
+                raise ValidationError(
+                    "`timestamp` is equal to the parent block's timestamp\n"
+                    "- block : {0}\n"
+                    "- parent: {1}. ".format(
+                        self.header.timestamp,
+                        parent_header.timestamp,
+                    )
+                )
+
+        if self.header.state_root not in self.db:
+            raise ValidationError(
+                "`state_root` was not found in the db.\n"
+                "- state_root: {0}".format(
+                    self.header.state_root,
+                )
+            )
+        local_uncle_hash = keccak(rlp.encode(self.uncles))
+        if local_uncle_hash != self.header.uncles_hash:
+            raise ValidationError(
+                "`uncles_hash` and block `uncles` do not match.\n"
+                " - num_uncles       : {0}\n"
+                " - block uncle_hash : {1}\n"
+                " - header uncle_hash: {2}".format(
+                    len(self.uncles),
+                    local_uncle_hash,
+                    self.header.uncle_hash,
+                )
+            )
 
         super(FrontierBlock, self).validate()
 
@@ -217,6 +254,10 @@ class FrontierBlock(BaseBlock):
         - `mix_hash`
         - `nonce`
         """
+        if 'uncles' in kwargs:
+            self.uncles = kwargs.pop('uncles')
+            kwargs.setdefault('uncles_hash', keccak(rlp.encode(self.uncles)))
+
         header = self.header
         provided_fields = set(kwargs.keys())
         known_fields = set(tuple(zip(*BlockHeader.fields))[0])
@@ -234,5 +275,7 @@ class FrontierBlock(BaseBlock):
         for key, value in kwargs.items():
             setattr(header, key, value)
 
-        # TODO: do we validate here!?
+        # Perform validation
+        self.validate()
+
         return self

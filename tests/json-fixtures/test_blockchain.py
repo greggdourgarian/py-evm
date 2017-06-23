@@ -13,7 +13,7 @@ from eth_utils import (
 )
 
 from evm.exceptions import (
-    InvalidBlock,
+    ValidationError,
 )
 from evm.vm.flavors import (
     MainnetEVM,
@@ -55,6 +55,12 @@ def blockchain_fixture_skip_fn(fixture_path, fixture_name, fixture):
 SLOW_FIXTURE_NAMES = {
     'GeneralStateTests/stAttackTest/ContractCreationSpam.json:ContractCreationSpam_d0g0v0_Frontier',
     'GeneralStateTests/stBoundsTest/MLOAD_Bounds.json:MLOAD_Bounds_d0g0v0_Frontier',
+    'GeneralStateTests/stMemoryStressTest/CALLCODE_Bounds3.json:CALLCODE_Bounds3_d0g0v0_Frontier',
+    'GeneralStateTests/stMemoryStressTest/CALL_Bounds2.json:CALL_Bounds2_d0g0v0_Frontier',
+    'GeneralStateTests/stMemoryStressTest/CALL_Bounds2a.json:CALL_Bounds2a_d0g0v0_Frontier',
+    'GeneralStateTests/stCallCreateCallCodeTest/Call1024OOG.json:Call1024OOG_d0g0v0_Frontier',
+    'GeneralStateTests/stCallCreateCallCodeTest/Callcode1024OOG.json:Callcode1024OOG_d0g0v0_Frontier',
+    'GeneralStateTests/stCallCreateCallCodeTest/CallRecursiveBombPreCall.json:CallRecursiveBombPreCall_d0g0v0_Frontier',
 }
 
 
@@ -173,64 +179,70 @@ def test_blockchain_fixtures(fixture_name, fixture):
                 sedes=evm.get_vm().get_block_class(),
             )
         except :
-            assert not should_be_good_block, "Block should be good"
+            assert not should_be_good_block, "Block should not be good"
             continue
 
-        try:
-            expected_block.validate()
-        except InvalidBlock:
-            assert not should_be_good_block, "Block should be good"
-            continue
+        if should_be_good_block:
+            # set the gas limit as this value is only required to be within a
+            # specific range and can be picked by the party who crafts the block.
+            evm.configure_header(
+                extra_data=expected_block.header.extra_data,
+                gas_limit=expected_block.header.gas_limit,
+                coinbase=expected_block.header.coinbase,
+                timestamp=expected_block.header.timestamp,
+            )
 
-        expected_header = BlockHeader(
-            parent_hash=block_data['blockHeader']['parentHash'],
-            uncles_hash=block_data['blockHeader']['uncleHash'],
-            coinbase=block_data['blockHeader']['coinbase'],
-            state_root=block_data['blockHeader']['stateRoot'],
-            transaction_root=block_data['blockHeader']['transactionsTrie'],
-            receipt_root=block_data['blockHeader']['receiptTrie'],
-            bloom=block_data['blockHeader']['bloom'],
-            difficulty=block_data['blockHeader']['difficulty'],
-            block_number=block_data['blockHeader']['number'],
-            gas_limit=block_data['blockHeader']['gasLimit'],
-            gas_used=block_data['blockHeader']['gasUsed'],
-            timestamp=block_data['blockHeader']['timestamp'],
-            extra_data=block_data['blockHeader']['extraData'],
-            mix_hash=block_data['blockHeader']['mixHash'],
-            nonce=block_data['blockHeader']['nonce'],
-        )
-        # set the gas limit as this value is only required to be within a
-        # specific range and can be picked by the party who crafts the block.
-        evm.configure_header(
-            extra_data=expected_block.header.extra_data,
-            gas_limit=expected_block.header.gas_limit,
-            coinbase=expected_block.header.coinbase,
-            timestamp=expected_block.header.timestamp,
-        )
+            for transaction in block_data['transactions']:
+                txn_kwargs = {
+                    'data': transaction['data'],
+                    'gas': transaction['gasLimit'],
+                    'gas_price': transaction['gasPrice'],
+                    'nonce': transaction['nonce'],
+                    'to': transaction['to'],
+                    'value': transaction['value'],
+                    'r': transaction['r'],
+                    's': transaction['s'],
+                    'v': transaction['v'],
+                }
+                transaction = evm.create_transaction(**txn_kwargs)
+                computation = evm.apply_transaction(transaction)
 
-        for transaction in block_data['transactions']:
-            txn_kwargs = {
-                'data': transaction['data'],
-                'gas': transaction['gasLimit'],
-                'gas_price': transaction['gasPrice'],
-                'nonce': transaction['nonce'],
-                'to': transaction['to'],
-                'value': transaction['value'],
-                'r': transaction['r'],
-                's': transaction['s'],
-                'v': transaction['v'],
-            }
-            transaction = evm.create_transaction(**txn_kwargs)
-            computation = evm.apply_transaction(transaction)
+            assert not block_data.get('uncleHeaders', False), 'Time to deal with uncles'
+            block = evm.mine_block(
+                mix_hash=expected_block.header.mix_hash,
+                nonce=expected_block.header.nonce,
+            )
+            expected_header = BlockHeader(
+                parent_hash=block_data['blockHeader']['parentHash'],
+                uncles_hash=block_data['blockHeader']['uncleHash'],
+                coinbase=block_data['blockHeader']['coinbase'],
+                state_root=block_data['blockHeader']['stateRoot'],
+                transaction_root=block_data['blockHeader']['transactionsTrie'],
+                receipt_root=block_data['blockHeader']['receiptTrie'],
+                bloom=block_data['blockHeader']['bloom'],
+                difficulty=block_data['blockHeader']['difficulty'],
+                block_number=block_data['blockHeader']['number'],
+                gas_limit=block_data['blockHeader']['gasLimit'],
+                gas_used=block_data['blockHeader']['gasUsed'],
+                timestamp=block_data['blockHeader']['timestamp'],
+                extra_data=block_data['blockHeader']['extraData'],
+                mix_hash=block_data['blockHeader']['mixHash'],
+                nonce=block_data['blockHeader']['nonce'],
+            )
 
-        block = evm.mine_block(
-            mix_hash=expected_block.header.mix_hash,
-            nonce=expected_block.header.nonce,
-        )
+            assert_rlp_equal(block.header, expected_header)
+            assert_rlp_equal(block, expected_block)
 
-        assert_rlp_equal(block.header, expected_header)
-        assert_rlp_equal(block, expected_block)
+            assert rlp.encode(block) == block_data['rlp']
+        else:
+            try:
+                expected_block.validate()
+            except ValidationError:
+                assert not should_be_good_block, "Block should not be good"
+                continue
 
-        assert rlp.encode(block) == block_data['rlp']
+        assert should_be_good_block, "Block should cause a validation error"
+
+    assert evm.get_block_by_number(evm.get_block().number - 1).hash == fixture['lastblockhash']
 
     verify_state_db(fixture['postState'], evm.get_state_db())
