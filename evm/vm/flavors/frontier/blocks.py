@@ -104,6 +104,15 @@ class FrontierBlock(BaseBlock):
                     )
                 )
 
+        if len(self.uncles) > 2:
+            raise ValidationError(
+                "Blocks may have a maximum of two uncles.  Found "
+                "{0}.".format(len(self.uncles))
+            )
+
+        for uncle in self.uncles:
+            self.validate_uncle(uncle)
+
         if self.header.state_root not in self.db:
             raise ValidationError(
                 "`state_root` was not found in the db.\n"
@@ -125,6 +134,9 @@ class FrontierBlock(BaseBlock):
             )
 
         super(FrontierBlock, self).validate()
+
+    def validate_uncle(self, uncle):
+        raise NotImplementedError("Not yet implemented")
 
     #
     # Helpers
